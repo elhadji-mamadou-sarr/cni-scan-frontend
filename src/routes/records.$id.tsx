@@ -1,5 +1,14 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Download, FileText, FileJson, History, ShieldCheck } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  ArrowLeft,
+  Download,
+  FileJson,
+  Printer,
+  Pencil,
+  ShieldCheck,
+  AlertTriangle,
+  Loader2,
+} from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,12 +18,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useCniDetail } from "@/lib/hooks";
+import type { CniDetail, CniRectoOut, CniVersoOut } from "@/lib/types";
 
 export const Route = createFileRoute("/records/$id")({
   head: ({ params }) => ({
     meta: [
       { title: `Enregistrement ${params.id} — CNI Scan` },
-      { name: "description", content: "Fiche détaillée d'une CNI archivée : champs, images et historique." },
+      { name: "description", content: "Fiche détaillée d'une CNI archivée : champs recto, verso et MRZ." },
     ],
   }),
   component: RecordDetail,
@@ -22,78 +33,109 @@ export const Route = createFileRoute("/records/$id")({
 
 type Row = { label: string; value: string; mono?: boolean };
 
-const RECTO_ROWS: Row[] = [
-  { label: "Numéro de la carte", value: "1 234 5678 9012", mono: true },
-  { label: "Nom", value: "NDIAYE" },
-  { label: "Prénom", value: "Fatou" },
-  { label: "Sexe", value: "F" },
-  { label: "Taille", value: "1,68 m" },
-  { label: "Date de naissance", value: "15/07/1998", mono: true },
-  { label: "Lieu de naissance", value: "Rufisque" },
-  { label: "Date de délivrance", value: "12/03/2022", mono: true },
-  { label: "Date d'expiration", value: "12/03/2032", mono: true },
-  { label: "Centre d'enregistrement", value: "Dakar - Plateau" },
-  { label: "Adresse du domicile", value: "Sicap Liberté 6, Villa n° 5432" },
-];
+const dash = (v: string | null | undefined) => (v == null || v === "" ? "—" : v);
 
-const VERSO_ROWS: Row[] = [
-  { label: "Code pays", value: "SEN", mono: true },
-  { label: "Numéro d'électeur", value: "7788221345", mono: true },
-  { label: "Région", value: "Dakar" },
-  { label: "Département", value: "Dakar" },
-  { label: "Arrondissement", value: "Grand Dakar" },
-  { label: "Commune", value: "Sicap Liberté" },
-  { label: "Lieu de vote", value: "École Élémentaire Liberté 6" },
-  { label: "Bureau", value: "04", mono: true },
-  { label: "NIN", value: "1 8909 1998 00234", mono: true },
-];
+function rectoRows(r: CniRectoOut): Row[] {
+  return [
+    { label: "Numéro de la carte", value: dash(r.numero_cni), mono: true },
+    { label: "Nom", value: dash(r.nom) },
+    { label: "Prénom", value: dash(r.prenom) },
+    { label: "Sexe", value: dash(r.sexe) },
+    { label: "Taille", value: r.taille != null ? `${r.taille} m` : "—", mono: true },
+    { label: "Lieu de naissance", value: dash(r.lieu_naissance) },
+    { label: "Date de délivrance", value: dash(r.date_delivrance), mono: true },
+    { label: "Date d'expiration", value: dash(r.date_expiration), mono: true },
+    { label: "Centre d'enregistrement", value: dash(r.centre_enregistrement) },
+    { label: "Adresse du domicile", value: dash(r.adresse_domicile) },
+  ];
+}
 
-const HISTORY = [
-  { at: "09 juil. 2026 — 14:32", by: "Aïcha Diop", action: "Extraction OCR initiale" },
-  { at: "09 juil. 2026 — 14:33", by: "Aïcha Diop", action: "Correction manuelle : Adresse du domicile" },
-  { at: "09 juil. 2026 — 14:34", by: "Aïcha Diop", action: "Validation et enregistrement" },
-];
+function versoRows(v: CniVersoOut): Row[] {
+  return [
+    { label: "Code pays", value: dash(v.code_pays), mono: true },
+    { label: "Numéro d'électeur", value: dash(v.numero_electeur), mono: true },
+    { label: "Région", value: dash(v.region) },
+    { label: "Département", value: dash(v.departement) },
+    { label: "Arrondissement", value: dash(v.arrondissement) },
+    { label: "Commune", value: dash(v.commune) },
+    { label: "Lieu de vote", value: dash(v.lieu_vote) },
+    { label: "Bureau", value: dash(v.bureau), mono: true },
+    { label: "NIN", value: dash(v.nin), mono: true },
+  ];
+}
 
 function Row({ label, value, mono }: Row) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-2.5 border-b border-border last:border-b-0">
+    <div className="flex items-baseline justify-between gap-4 border-b border-border py-2.5 last:border-b-0">
       <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={mono ? "font-mono-data text-[13px] text-foreground text-right" : "text-sm font-medium text-foreground text-right"}>
+      <div
+        className={
+          mono
+            ? "font-mono-data text-right text-[13px] text-foreground"
+            : "text-right text-sm font-medium text-foreground"
+        }
+      >
         {value}
       </div>
     </div>
   );
 }
 
-function CardStub({ side }: { side: "Recto" | "Verso" }) {
-  return (
-    <div
-      className="relative aspect-[1.586/1] w-full overflow-hidden rounded-md border border-border shadow-[var(--shadow-card)]"
-      style={{
-        background:
-          "linear-gradient(135deg, oklch(0.94 0.03 155) 0%, oklch(0.92 0.04 100) 55%, oklch(0.93 0.06 30) 100%)",
-      }}
-    >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(255,255,255,0.5),transparent_50%)]" />
-      <div className="absolute inset-0 p-3 text-[color:oklch(0.22_0.06_255)]">
-        <div className="text-[8px] font-semibold uppercase tracking-widest opacity-80">
-          République du Sénégal
-        </div>
-        <div className="text-[10px] font-bold uppercase tracking-wide">
-          Carte Nationale d'Identité — {side}
-        </div>
-      </div>
-    </div>
-  );
+function downloadJson(id: string, detail: CniDetail) {
+  const blob = new Blob([JSON.stringify(detail, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cni-${id}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function RecordDetail() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
+  const { data, isLoading, isError, error } = useCniDetail(id);
+
+  if (isLoading) {
+    return (
+      <AppShell breadcrumb={`Enregistrement · ${id}`} title="Chargement…">
+        <div className="flex items-center justify-center gap-2 p-16 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Chargement de la fiche…
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <AppShell breadcrumb={`Enregistrement · ${id}`} title="Fiche introuvable">
+        <div className="mx-auto max-w-md p-10 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-danger-soft text-danger">
+            <AlertTriangle className="h-7 w-7" />
+          </div>
+          <p className="mt-4 text-sm text-muted-foreground">
+            {isError ? error.message : "Cette carte n'existe pas."}
+          </p>
+          <Link to="/">
+            <Button className="mt-6">Retour au tableau de bord</Button>
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const { recto, verso } = data;
+  const fullName = [recto.nom, recto.prenom].filter(Boolean).join(" ") || recto.numero_cni;
+  const mrzLines = [verso.mrz_ligne1, verso.mrz_ligne2, verso.mrz_ligne3].filter(
+    (l): l is string => Boolean(l),
+  );
 
   return (
     <AppShell
       breadcrumb={`Enregistrement · ${id}`}
-      title="NDIAYE Fatou"
+      title={fullName}
       actions={
         <div className="flex items-center gap-2">
           <Link to="/">
@@ -101,6 +143,13 @@ function RecordDetail() {
               <ArrowLeft className="h-4 w-4" /> Retour
             </Button>
           </Link>
+          <Button
+            variant="outline"
+            className="h-10 gap-1.5"
+            onClick={() => navigate({ to: "/verify", search: { numero: recto.numero_cni } })}
+          >
+            <Pencil className="h-4 w-4" /> Modifier
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button className="h-10 gap-2">
@@ -108,11 +157,11 @@ function RecordDetail() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>
-                <FileText className="h-4 w-4 mr-2" /> Export PDF
+              <DropdownMenuItem onClick={() => downloadJson(id, data)}>
+                <FileJson className="h-4 w-4 mr-2" /> Télécharger le JSON
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <FileJson className="h-4 w-4 mr-2" /> Export JSON
+              <DropdownMenuItem onClick={() => window.print()}>
+                <Printer className="h-4 w-4 mr-2" /> Imprimer / PDF
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -127,96 +176,49 @@ function RecordDetail() {
               Numéro de carte
             </div>
             <div className="font-mono-data text-xl font-semibold text-foreground">
-              1 234 5678 9012
+              {recto.numero_cni}
             </div>
           </div>
           <div className="h-10 w-px bg-border" />
           <div>
             <div className="text-xs uppercase tracking-wider text-muted-foreground">NIN</div>
             <div className="font-mono-data text-sm font-semibold text-foreground">
-              1 8909 1998 00234
+              {dash(verso.nin)}
             </div>
-          </div>
-          <div className="h-10 w-px bg-border" />
-          <div>
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">
-              Extrait le
-            </div>
-            <div className="text-sm font-medium text-foreground">09 juil. 2026 — 14:32</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <Badge className="bg-success-soft text-success border border-success/20 hover:bg-success-soft">
-              <ShieldCheck className="h-3 w-3 mr-1" /> Validé
-            </Badge>
-            <Badge variant="outline" className="border-border text-muted-foreground">
-              Lecture seule
+            <Badge className="border border-success/20 bg-success-soft text-success hover:bg-success-soft">
+              <ShieldCheck className="mr-1 h-3 w-3" /> Enregistrée
             </Badge>
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-          {/* Left — images + history */}
-          <div className="space-y-4">
-            <div className="rounded-lg border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Images archivées
-              </div>
-              <div className="grid gap-3">
-                <CardStub side="Recto" />
-                <CardStub side="Verso" />
-              </div>
+        <div className="grid gap-6 xl:grid-cols-2">
+          <section className="rounded-lg border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
+            <h2 className="mb-3 text-sm font-semibold text-foreground">Champs Recto</h2>
+            <div>
+              {rectoRows(recto).map((r) => (
+                <Row key={r.label} {...r} />
+              ))}
             </div>
+          </section>
 
-            <div className="rounded-lg border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
-              <div className="mb-3 flex items-center gap-2">
-                <History className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-semibold text-foreground">Historique</h3>
-              </div>
-              <ol className="relative space-y-4 border-l border-border pl-4">
-                {HISTORY.map((h, i) => (
-                  <li key={i} className="relative">
-                    <span className="absolute -left-[19px] top-1 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-primary ring-4 ring-surface" />
-                    <div className="text-sm font-medium text-foreground">{h.action}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {h.at} · {h.by}
-                    </div>
-                  </li>
-                ))}
-              </ol>
+          <section className="rounded-lg border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
+            <h2 className="mb-3 text-sm font-semibold text-foreground">Champs Verso</h2>
+            <div>
+              {versoRows(verso).map((r) => (
+                <Row key={r.label} {...r} />
+              ))}
             </div>
-          </div>
-
-          {/* Right — data */}
-          <div className="space-y-5">
-            <section className="rounded-lg border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
-              <h2 className="mb-3 text-sm font-semibold text-foreground">
-                Champs Recto
-              </h2>
-              <div>
-                {RECTO_ROWS.map((r) => (
-                  <Row key={r.label} {...r} />
-                ))}
+            <div className="mt-5">
+              <div className="mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">
+                Zone MRZ (ICAO 9303 · TD1)
               </div>
-            </section>
-            <section className="rounded-lg border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
-              <h2 className="mb-3 text-sm font-semibold text-foreground">Champs Verso</h2>
-              <div>
-                {VERSO_ROWS.map((r) => (
-                  <Row key={r.label} {...r} />
-                ))}
-              </div>
-              <div className="mt-5">
-                <div className="mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-                  Zone MRZ (ICAO 9303 · TD1)
-                </div>
-                <pre className="rounded-md bg-surface-muted p-4 font-mono-data text-[13px] leading-relaxed text-foreground overflow-x-auto">
-{`IDSEN12345678<9012<<<<<<<<<<<<<
-9807152F3203127SEN<<<<<<<<<<<4
-NDIAYE<<FATOU<<<<<<<<<<<<<<<<<`}
-                </pre>
-              </div>
-            </section>
-          </div>
+              <pre className="overflow-x-auto rounded-md bg-surface-muted p-4 font-mono-data text-[13px] leading-relaxed text-foreground">
+                {mrzLines.length > 0 ? mrzLines.join("\n") : "— MRZ non disponible —"}
+              </pre>
+            </div>
+          </section>
         </div>
       </div>
     </AppShell>

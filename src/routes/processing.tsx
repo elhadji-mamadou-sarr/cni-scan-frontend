@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   Loader2,
@@ -15,6 +15,12 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useExtract } from "@/lib/hooks";
+import {
+  clearPendingUpload,
+  getPendingUpload,
+  setLastExtraction,
+} from "@/lib/flow-store";
 
 export const Route = createFileRoute("/processing")({
   head: () => ({
@@ -35,22 +41,60 @@ const STEPS = [
 ] as const;
 
 function ProcessingPage() {
-  const [step, setStep] = useState(0);
-  const [failed, setFailed] = useState(false);
   const navigate = useNavigate();
+  const extract = useExtract();
+  const startedRef = useRef(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  // Lance l'extraction à partir des fichiers déposés à l'étape 1.
+  const runExtraction = useCallback(() => {
+    const pending = getPendingUpload();
+    if (!pending) {
+      // Accès direct à /processing sans fichiers (ou après un rechargement) :
+      // rien à traiter, on renvoie au dépôt.
+      navigate({ to: "/upload" });
+      return;
+    }
+    extract.mutate(
+      { recto: pending.recto, verso: pending.verso, persist: pending.persist },
+      {
+        onSuccess: (data) => {
+          setLastExtraction(data);
+          clearPendingUpload();
+          navigate({ to: "/verify", search: { numero: data.recto.numero_cni } });
+        },
+      },
+    );
+  }, [extract, navigate]);
 
   useEffect(() => {
-    if (failed) return;
-    if (step >= STEPS.length) {
-      const t = setTimeout(() => navigate({ to: "/verify" }), 500);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setStep((s) => s + 1), 1100);
-    return () => clearTimeout(t);
-  }, [step, failed, navigate]);
+    if (startedRef.current) return; // évite le double-lancement (StrictMode)
+    startedRef.current = true;
+    runExtraction();
+  }, [runExtraction]);
 
-  const progress = Math.min(100, Math.round((step / STEPS.length) * 100));
-  const activeStep = STEPS[Math.min(step, STEPS.length - 1)];
+  // Chronomètre d'attente : sert à animer une progression *indicative* et à
+  // afficher un message rassurant au-delà de 15 s. Aucune étape n'est marquée
+  // « terminée » avant la vraie réponse.
+  useEffect(() => {
+    if (!extract.isPending) return;
+    setElapsed(0);
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [extract.isPending]);
+
+  const handleRetry = () => {
+    extract.reset();
+    runExtraction();
+  };
+
+  const failed = extract.isError;
+  const errorMessage = extract.error?.message ?? "L'extraction a échoué.";
+  // Progression asymptotique (n'atteint jamais 100 % : on navigue au succès).
+  const progress = Math.min(95, Math.round((1 - Math.exp(-elapsed / 12)) * 100));
+  const activeIndex = elapsed % STEPS.length; // rotation visuelle pendant l'attente
+  const activeStep = STEPS[activeIndex];
+  const longWait = elapsed >= 15;
 
   return (
     <AppShell breadcrumb="Nouvelle numérisation" title="Étape 2 · Extraction en cours">
@@ -112,11 +156,17 @@ function ProcessingPage() {
                 </h2>
                 <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
                   Veuillez patienter pendant que nos systèmes sécurisés analysent et valident
-                  le document d'identité.
+                  le document d'identité. L'extraction peut prendre plusieurs dizaines de secondes.
                 </p>
                 <p className="mt-3 text-[11px] font-medium uppercase tracking-widest text-primary">
                   {activeStep.label}
                 </p>
+                {longWait && (
+                  <p className="mx-auto mt-3 max-w-md text-xs text-muted-foreground">
+                    Le traitement est plus long que d'habitude — merci de patienter, ne fermez
+                    pas cette page.
+                  </p>
+                )}
               </div>
 
               <div className="mx-auto mt-6 max-w-lg">
@@ -133,13 +183,7 @@ function ProcessingPage() {
                 </div>
               </div>
 
-              <div className="mt-8 flex items-center justify-between border-t border-border pt-5">
-                <button
-                  onClick={() => setFailed(true)}
-                  className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                >
-                  Simuler une erreur d'extraction
-                </button>
+              <div className="mt-8 flex items-center justify-end border-t border-border pt-5">
                 <Button variant="ghost" onClick={() => navigate({ to: "/upload" })}>
                   <ArrowLeft className="h-4 w-4 mr-1.5" /> Annuler
                 </Button>
@@ -151,8 +195,8 @@ function ProcessingPage() {
               <div className="rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-foreground">Pipeline OCR</h3>
-                  <span className="font-mono-data text-[11px] font-semibold text-muted-foreground">
-                    {Math.min(step, STEPS.length)}/{STEPS.length}
+                  <span className="inline-flex items-center gap-1.5 font-mono-data text-[11px] font-semibold text-primary">
+                    <Loader2 className="h-3 w-3 animate-spin" /> En cours
                   </span>
                 </div>
 
@@ -160,22 +204,23 @@ function ProcessingPage() {
                   {/* Vertical spine */}
                   <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
 
+                  {/* Étapes *indicatives* : le backend est synchrone et ne remonte
+                      aucune progression réelle. On met en avant une étape à la fois
+                      par rotation, sans jamais marquer d'étape « terminée » avant
+                      la vraie réponse. */}
                   {STEPS.map((s, i) => {
-                    const done = i < step;
-                    const active = i === step;
+                    const active = i === activeIndex;
                     return (
                       <li key={s.key} className="relative flex items-start gap-3">
                         <div
                           className={cn(
                             "z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors",
-                            done && "border-success bg-success text-success-foreground",
-                            active && "border-primary bg-primary text-primary-foreground",
-                            !done && !active && "border-border bg-surface-muted text-muted-foreground",
+                            active
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-surface-muted text-muted-foreground",
                           )}
                         >
-                          {done ? (
-                            <Check className="h-4 w-4" />
-                          ) : active ? (
+                          {active ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Hourglass className="h-3.5 w-3.5" />
@@ -185,7 +230,7 @@ function ProcessingPage() {
                           <div
                             className={cn(
                               "text-sm font-medium leading-tight",
-                              done || active ? "text-foreground" : "text-muted-foreground",
+                              active ? "text-foreground" : "text-muted-foreground",
                             )}
                           >
                             {s.label}
@@ -193,12 +238,12 @@ function ProcessingPage() {
                           <div
                             className={cn(
                               "mt-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                              done && "bg-success-soft text-success",
-                              active && "bg-warning-soft text-warning-foreground",
-                              !done && !active && "bg-secondary text-muted-foreground",
+                              active
+                                ? "bg-warning-soft text-warning-foreground"
+                                : "bg-secondary text-muted-foreground",
                             )}
                           >
-                            {done ? "Terminé" : active ? "Analyse en cours…" : "En attente"}
+                            {active ? "Analyse en cours…" : "En attente"}
                           </div>
                         </div>
                       </li>
@@ -225,11 +270,10 @@ function ProcessingPage() {
               <AlertTriangle className="h-7 w-7" />
             </div>
             <h2 className="mt-4 text-lg font-semibold text-foreground">
-              L'image du verso est illisible
+              L'extraction a échoué
             </h2>
             <p className="mt-2 max-w-md mx-auto text-sm text-muted-foreground">
-              La zone MRZ n'a pas pu être décodée. Vérifiez la netteté et la luminosité,
-              puis réessayez avec une nouvelle capture.
+              {errorMessage}
             </p>
             <ul className="mx-auto mt-5 max-w-sm rounded-md border border-border bg-surface-muted p-4 text-left text-xs text-muted-foreground space-y-1.5">
               <li>· Vérifier que la carte est posée à plat</li>
@@ -240,14 +284,8 @@ function ProcessingPage() {
               <Button variant="outline" className="h-11" onClick={() => navigate({ to: "/upload" })}>
                 <ArrowLeft className="h-4 w-4 mr-1.5" /> Retour au dépôt
               </Button>
-              <Button
-                className="h-11"
-                onClick={() => {
-                  setFailed(false);
-                  setStep(0);
-                }}
-              >
-                Réessayer avec une autre image
+              <Button className="h-11" onClick={handleRetry}>
+                Réessayer
               </Button>
             </div>
           </div>

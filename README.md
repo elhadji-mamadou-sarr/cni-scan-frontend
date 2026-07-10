@@ -22,9 +22,10 @@ cp .env.example .env.local
 | -------------- | --------------------------------------------- | ----------------------- |
 | `VITE_API_URL` | URL de base de l'API backend (sans slash fin) | `http://127.0.0.1:8000` |
 
-> Le backend doit autoriser l'origine du frontend en CORS. Le dev server Vite
-> (`http://localhost:5173` / `http://127.0.0.1:5173`) est autorisé par défaut
-> (variable `CORS_ORIGINS` côté backend).
+> Le backend doit autoriser l'origine du frontend en CORS. Le dev server écoute
+> sur **`http://localhost:8080`** (port imposé par `@lovable.dev/vite-tanstack-config`,
+> avec repli 8081… si 8080 est occupé). Le backend autorise par défaut tout
+> `localhost`/`127.0.0.1` en dev (variables `CORS_ORIGINS` + `CORS_ORIGIN_REGEX`).
 
 ## Lancer les deux serveurs
 
@@ -40,7 +41,7 @@ uvicorn api.main:app --reload   # http://127.0.0.1:8000  (Swagger: /docs)
 
 ```bash
 npm install
-npm run dev                     # http://localhost:5173
+npm run dev                     # http://localhost:8080  (repli 8081… si occupé)
 ```
 
 ## Scripts

@@ -20,11 +20,14 @@ const BASE_URL = (import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000").repla
 /** Erreur d'API normalisée. `status = 0` signifie « serveur injoignable ». */
 export class ApiError extends Error {
   readonly status: number;
+  /** Erreurs par champ (422 de validation), clé = nom du champ (ex. "sexe"). */
+  readonly fields?: Record<string, string>;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, fields?: Record<string, string>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.fields = fields;
   }
 }
 
@@ -47,6 +50,26 @@ function extractDetailMessage(body: unknown): string | null {
   return null;
 }
 
+/**
+ * Extrait les erreurs par champ d'une réponse 422 FastAPI. Le `loc` est de la
+ * forme ["body", "recto", "sexe"] : on retient le dernier segment comme champ.
+ */
+function extractFieldErrors(body: unknown): Record<string, string> | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const detail = (body as FastApiErrorBody).detail;
+  if (!Array.isArray(detail)) return undefined;
+  const fields: Record<string, string> = {};
+  for (const item of detail) {
+    const loc = item?.loc;
+    const msg = item?.msg;
+    if (Array.isArray(loc) && loc.length > 0 && typeof msg === "string") {
+      const key = String(loc[loc.length - 1]);
+      if (key !== "body") fields[key] = msg;
+    }
+  }
+  return Object.keys(fields).length > 0 ? fields : undefined;
+}
+
 /** Construit un ApiError avec le message français adapté au statut HTTP. */
 async function toApiError(response: Response): Promise<ApiError> {
   let body: unknown = null;
@@ -63,7 +86,7 @@ async function toApiError(response: Response): Promise<ApiError> {
     case 415:
       return new ApiError(415, "Format non supporté (JPEG ou PNG attendu)");
     case 422:
-      return new ApiError(422, backendMessage ?? "Données invalides");
+      return new ApiError(422, backendMessage ?? "Données invalides", extractFieldErrors(body));
     case 404:
       return new ApiError(404, backendMessage ?? "Ressource introuvable");
     default:
