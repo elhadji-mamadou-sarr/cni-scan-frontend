@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   UploadCloud,
   Camera,
@@ -17,6 +17,11 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { setPendingUpload } from "@/lib/flow-store";
+
+/** Validation client, alignée sur le backend (image/jpeg|png, 10 Mo max). */
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+const ACCEPTED_TYPES = ["image/jpeg", "image/png"];
 
 export const Route = createFileRoute("/upload")({
   head: () => ({
@@ -37,18 +42,43 @@ function DropZone({
   onClear,
 }: {
   side: Side;
-  file: string | null;
-  onFile: (dataUrl: string) => void;
+  file: File | null;
+  onFile: (file: File) => void;
   onClear: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  // Aperçu via objectURL révoqué au changement (pas de fuite mémoire).
+  useEffect(() => {
+    if (!file) {
+      setPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const handleFiles = (f: File | undefined) => {
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => onFile(String(reader.result));
-    reader.readAsDataURL(f);
+    if (!ACCEPTED_TYPES.includes(f.type)) {
+      setError("Format non supporté (JPEG ou PNG attendu)");
+      return;
+    }
+    if (f.size > MAX_UPLOAD_SIZE) {
+      setError("Fichier trop volumineux (max 10 Mo)");
+      return;
+    }
+    setError(null);
+    onFile(f);
+  };
+
+  const handleClear = () => {
+    setError(null);
+    onClear();
   };
 
   const label = side === "recto" ? "Recto" : "Verso";
@@ -67,11 +97,11 @@ function DropZone({
         )}
       </div>
 
-      {file ? (
+      {preview ? (
         <div className="relative overflow-hidden rounded-lg border border-border bg-surface-muted">
           <div className="aspect-[1.586/1] w-full">
             <img
-              src={file}
+              src={preview}
               alt={`Aperçu ${side}`}
               className="h-full w-full object-cover"
             />
@@ -92,7 +122,7 @@ function DropZone({
                 variant="secondary"
                 className="h-8 w-8 bg-white/95 text-danger hover:bg-white"
                 aria-label="Supprimer"
-                onClick={onClear}
+                onClick={handleClear}
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -101,7 +131,7 @@ function DropZone({
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png"
             className="hidden"
             onChange={(e) => handleFiles(e.target.files?.[0])}
           />
@@ -154,30 +184,44 @@ function DropZone({
             <Camera className="h-3.5 w-3.5" /> Capturer par webcam
           </Button>
           <div className="absolute bottom-2 text-[10px] text-muted-foreground/70">
-            PNG · JPG · HEIC — 10 Mo max
+            JPEG · PNG — 10 Mo max
           </div>
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png"
             className="hidden"
             onChange={(e) => handleFiles(e.target.files?.[0])}
           />
         </label>
+      )}
+
+      {error && (
+        <p className="flex items-center gap-1.5 px-0.5 text-xs font-medium text-danger">
+          <X className="h-3.5 w-3.5 shrink-0" /> {error}
+        </p>
       )}
     </div>
   );
 }
 
 function UploadPage() {
-  const [recto, setRecto] = useState<string | null>(null);
-  const [verso, setVerso] = useState<string | null>(null);
+  const [recto, setRecto] = useState<File | null>(null);
+  const [verso, setVerso] = useState<File | null>(null);
   const [consent, setConsent] = useState(false);
   const navigate = useNavigate();
 
   const count = (recto ? 1 : 0) + (verso ? 1 : 0);
   const ready = count === 2 && consent;
   const progress = (count / 2) * 100;
+
+  const handleSubmit = () => {
+    if (!recto || !verso) return;
+    // Remise des fichiers au store ; /processing lance l'extraction (sans
+    // persister : l'enregistrement se fait à l'étape de vérification).
+    setPendingUpload({ recto, verso });
+    navigate({ to: "/processing" });
+  };
 
   return (
     <AppShell breadcrumb="Nouvelle numérisation" title="Étape 1 · Dépôt des images">
@@ -313,7 +357,7 @@ function UploadPage() {
               <Button
                 className="mt-4 h-11 w-full gap-2"
                 disabled={!ready}
-                onClick={() => navigate({ to: "/processing" })}
+                onClick={handleSubmit}
               >
                 <UploadCloud className="h-4 w-4" />
                 Lancer l'extraction
