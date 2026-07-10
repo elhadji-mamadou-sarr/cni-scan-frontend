@@ -9,18 +9,13 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as UploadRouteImport } from './routes/upload'
 import { Route as ProcessingRouteImport } from './routes/processing'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as VerifyNumeroRouteImport } from './routes/verify.$numero'
 import { Route as RecordsIdRouteImport } from './routes/records.$id'
 
-const VerifyRoute = VerifyRouteImport.update({
-  id: '/verify',
-  path: '/verify',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const UploadRoute = UploadRouteImport.update({
   id: '/upload',
   path: '/upload',
@@ -41,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const VerifyNumeroRoute = VerifyNumeroRouteImport.update({
+  id: '/verify/$numero',
+  path: '/verify/$numero',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RecordsIdRoute = RecordsIdRouteImport.update({
   id: '/records/$id',
   path: '/records/$id',
@@ -52,16 +52,16 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/processing': typeof ProcessingRoute
   '/upload': typeof UploadRoute
-  '/verify': typeof VerifyRoute
   '/records/$id': typeof RecordsIdRoute
+  '/verify/$numero': typeof VerifyNumeroRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/processing': typeof ProcessingRoute
   '/upload': typeof UploadRoute
-  '/verify': typeof VerifyRoute
   '/records/$id': typeof RecordsIdRoute
+  '/verify/$numero': typeof VerifyNumeroRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -69,23 +69,34 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/processing': typeof ProcessingRoute
   '/upload': typeof UploadRoute
-  '/verify': typeof VerifyRoute
   '/records/$id': typeof RecordsIdRoute
+  '/verify/$numero': typeof VerifyNumeroRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/login' | '/processing' | '/upload' | '/verify' | '/records/$id'
+    | '/'
+    | '/login'
+    | '/processing'
+    | '/upload'
+    | '/records/$id'
+    | '/verify/$numero'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/processing' | '/upload' | '/verify' | '/records/$id'
+  to:
+    | '/'
+    | '/login'
+    | '/processing'
+    | '/upload'
+    | '/records/$id'
+    | '/verify/$numero'
   id:
     | '__root__'
     | '/'
     | '/login'
     | '/processing'
     | '/upload'
-    | '/verify'
     | '/records/$id'
+    | '/verify/$numero'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -93,19 +104,12 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ProcessingRoute: typeof ProcessingRoute
   UploadRoute: typeof UploadRoute
-  VerifyRoute: typeof VerifyRoute
   RecordsIdRoute: typeof RecordsIdRoute
+  VerifyNumeroRoute: typeof VerifyNumeroRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/verify': {
-      id: '/verify'
-      path: '/verify'
-      fullPath: '/verify'
-      preLoaderRoute: typeof VerifyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/upload': {
       id: '/upload'
       path: '/upload'
@@ -134,6 +138,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/verify/$numero': {
+      id: '/verify/$numero'
+      path: '/verify/$numero'
+      fullPath: '/verify/$numero'
+      preLoaderRoute: typeof VerifyNumeroRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/records/$id': {
       id: '/records/$id'
       path: '/records/$id'
@@ -149,8 +160,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ProcessingRoute: ProcessingRoute,
   UploadRoute: UploadRoute,
-  VerifyRoute: VerifyRoute,
   RecordsIdRoute: RecordsIdRoute,
+  VerifyNumeroRoute: VerifyNumeroRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
