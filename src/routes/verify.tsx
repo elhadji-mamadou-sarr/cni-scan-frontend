@@ -24,11 +24,12 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getLastExtraction } from "@/lib/flow-store";
-import { useCniDetail, useUpdateCni } from "@/lib/hooks";
+import { useCniDetail, useSaveCni } from "@/lib/hooks";
 import type {
+  CniRectoIn,
   CniRectoOut,
-  CniUpdateIn,
   CniVersoOut,
+  CniVersoUpdate,
 } from "@/lib/types";
 
 export const Route = createFileRoute("/verify")({
@@ -179,7 +180,7 @@ function FieldRow({
 function VerifyPage() {
   const { numero } = Route.useSearch();
   const navigate = useNavigate();
-  const updateCni = useUpdateCni();
+  const saveCni = useSaveCni();
 
   // Source des données : extraction en mémoire (flux upload) si elle correspond
   // au numéro, sinon lecture API (accès direct à l'URL / rechargement).
@@ -255,6 +256,12 @@ function VerifyPage() {
 
   // --- Enregistrement ----------------------------------------------------
 
+  const handleReject = () => {
+    // Rien n'a été persisté à l'extraction : on abandonne simplement.
+    toast.info("Extraction rejetée — carte non enregistrée.");
+    navigate({ to: "/" });
+  };
+
   const handleSave = () => {
     if (!cardNumber) return;
 
@@ -265,43 +272,38 @@ function VerifyPage() {
       return;
     }
 
-    const rectoUpdate: Record<string, string | number | null> = {};
+    // On envoie la carte COMPLÈTE (champs corrigés) : POST /cni persiste
+    // (upsert). Vide -> null pour ne pas enregistrer de chaîne vide.
+    const rectoPayload: Record<string, string | number | null> = { numero_cni: cardNumber };
     for (const key of RECTO_KEYS) {
-      if (form[key] === initialRef.current[key]) continue;
       const raw = form[key].trim();
-      if (key === "taille") {
-        rectoUpdate[key] = raw === "" ? null : Number(raw.replace(",", "."));
-      } else {
-        rectoUpdate[key] = raw === "" ? null : raw;
-      }
+      rectoPayload[key] =
+        key === "taille"
+          ? raw === ""
+            ? null
+            : Number(raw.replace(",", "."))
+          : raw === ""
+            ? null
+            : raw;
     }
-    const versoUpdate: Record<string, string | null> = {};
+    const versoPayload: Record<string, string | null> = {};
     for (const key of VERSO_KEYS) {
-      if (form[key] === initialRef.current[key]) continue;
       const raw = form[key].trim();
-      versoUpdate[key] = raw === "" ? null : raw;
+      versoPayload[key] = raw === "" ? null : raw;
     }
-
-    const updates: CniUpdateIn = {};
-    if (Object.keys(rectoUpdate).length) updates.recto = rectoUpdate;
-    if (Object.keys(versoUpdate).length) updates.verso = versoUpdate;
-
-    const goToDetail = () =>
-      navigate({ to: "/records/$id", params: { id: cardNumber } });
-
-    if (!updates.recto && !updates.verso) {
-      toast.info("Aucune modification à enregistrer.");
-      goToDetail();
-      return;
-    }
+    // La MRZ (lecture seule) n'est pas dans le formulaire : on la reprend
+    // telle quelle de l'extraction pour la persister.
+    versoPayload.mrz_ligne1 = verso?.mrz_ligne1 ?? null;
+    versoPayload.mrz_ligne2 = verso?.mrz_ligne2 ?? null;
+    versoPayload.mrz_ligne3 = verso?.mrz_ligne3 ?? null;
 
     setFieldErrors({});
-    updateCni.mutate(
-      { numero: cardNumber, updates },
+    saveCni.mutate(
+      { recto: rectoPayload as CniRectoIn, verso: versoPayload as CniVersoUpdate },
       {
         onSuccess: () => {
           toast.success("CNI validée et enregistrée");
-          goToDetail();
+          navigate({ to: "/records/$id", params: { id: cardNumber } });
         },
         onError: (err) => {
           if (err.fields) {
@@ -315,7 +317,7 @@ function VerifyPage() {
     );
   };
 
-  const saving = updateCni.isPending;
+  const saving = saveCni.isPending;
 
   return (
     <AppShell
@@ -323,8 +325,8 @@ function VerifyPage() {
       title="Vérification et correction des données extraites"
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="h-10" disabled={saving} onClick={() => navigate({ to: "/" })}>
-            <X className="h-4 w-4 mr-1.5" /> Annuler
+          <Button variant="outline" className="h-10" disabled={saving} onClick={handleReject}>
+            <X className="h-4 w-4 mr-1.5" /> Rejeter
           </Button>
           <Button className="h-10 gap-1.5" disabled={saving} onClick={handleSave}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -454,12 +456,18 @@ function VerifyPage() {
 
             <div className="flex items-center justify-between rounded-lg border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
               <div className="text-xs text-muted-foreground">
-                En validant, seules les corrections apportées seront transmises à la base.
+                La carte n'est enregistrée qu'à la validation. « Rejeter » l'abandonne
+                sans rien enregistrer.
               </div>
-              <Button className="h-11 gap-1.5" disabled={saving} onClick={handleSave}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                Valider et enregistrer
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" className="h-11" disabled={saving} onClick={handleReject}>
+                  Rejeter
+                </Button>
+                <Button className="h-11 gap-1.5" disabled={saving} onClick={handleSave}>
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Valider et enregistrer
+                </Button>
+              </div>
             </div>
           </div>
         </div>

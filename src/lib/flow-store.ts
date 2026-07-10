@@ -12,7 +12,6 @@ import type { CniExtractionResponse } from "./types";
 export interface PendingUpload {
   recto: File;
   verso: File;
-  persist: boolean;
 }
 
 let pendingUpload: PendingUpload | null = null;

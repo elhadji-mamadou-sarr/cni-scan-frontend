@@ -47,6 +47,8 @@ function ProcessingPage() {
   const [elapsed, setElapsed] = useState(0);
 
   // Lance l'extraction à partir des fichiers déposés à l'étape 1.
+  // persist=false : on n'enregistre PAS ici. La persistance se fait à l'étape
+  // de vérification (bouton « Valider et enregistrer »).
   const runExtraction = useCallback(() => {
     const pending = getPendingUpload();
     if (!pending) {
@@ -55,16 +57,7 @@ function ProcessingPage() {
       navigate({ to: "/upload" });
       return;
     }
-    extract.mutate(
-      { recto: pending.recto, verso: pending.verso, persist: pending.persist },
-      {
-        onSuccess: (data) => {
-          setLastExtraction(data);
-          clearPendingUpload();
-          navigate({ to: "/verify", search: { numero: data.recto.numero_cni } });
-        },
-      },
-    );
+    extract.mutate({ recto: pending.recto, verso: pending.verso, persist: false });
   }, [extract, navigate]);
 
   useEffect(() => {
@@ -72,6 +65,17 @@ function ProcessingPage() {
     startedRef.current = true;
     runExtraction();
   }, [runExtraction]);
+
+  // Navigation pilotée par l'ÉTAT de la mutation (et non par un callback
+  // onSuccess passé à mutate() : en dev/StrictMode ce callback peut ne pas
+  // être rappelé après un remontage, laissant l'écran bloqué malgré un
+  // backend qui a répondu 200).
+  useEffect(() => {
+    if (!extract.isSuccess || !extract.data) return;
+    setLastExtraction(extract.data);
+    clearPendingUpload();
+    navigate({ to: "/verify", search: { numero: extract.data.recto.numero_cni } });
+  }, [extract.isSuccess, extract.data, navigate]);
 
   // Chronomètre d'attente : sert à animer une progression *indicative* et à
   // afficher un message rassurant au-delà de 15 s. Aucune étape n'est marquée

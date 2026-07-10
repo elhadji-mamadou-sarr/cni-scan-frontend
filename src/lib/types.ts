@@ -92,3 +92,14 @@ export interface CniUpdateIn {
   recto?: CniRectoUpdate;
   verso?: CniVersoUpdate;
 }
+
+/**
+ * Corps du POST /cni : enregistrement d'une carte extraite après vérification.
+ * `recto.numero_cni` est requis (identité de la carte).
+ */
+export type CniRectoIn = CniRectoUpdate & { numero_cni: string };
+
+export interface CniCreateIn {
+  recto: CniRectoIn;
+  verso?: CniVersoUpdate;
+}

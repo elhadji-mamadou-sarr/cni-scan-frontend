@@ -217,8 +217,9 @@ function UploadPage() {
 
   const handleSubmit = () => {
     if (!recto || !verso) return;
-    // Remise des fichiers au store ; /processing lance alors l'extraction.
-    setPendingUpload({ recto, verso, persist: true });
+    // Remise des fichiers au store ; /processing lance l'extraction (sans
+    // persister : l'enregistrement se fait à l'étape de vérification).
+    setPendingUpload({ recto, verso });
     navigate({ to: "/processing" });
   };
 

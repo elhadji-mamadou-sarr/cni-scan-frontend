@@ -6,6 +6,7 @@
  *   message en français adapté au code HTTP. `status = 0` = backend injoignable.
  */
 import type {
+  CniCreateIn,
   CniDetail,
   CniExtractionResponse,
   CniListResult,
@@ -159,6 +160,15 @@ export async function listCni(params?: {
   const totalHeader = response.headers.get("X-Total-Count");
   const total = totalHeader != null ? Number(totalHeader) : items.length;
   return { items, total: Number.isNaN(total) ? items.length : total };
+}
+
+/** POST /cni — enregistre (upsert) une carte extraite après vérification. */
+export function postCni(payload: CniCreateIn): Promise<CniDetail> {
+  return requestJson<CniDetail>("/cni", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 /** GET /cni/{numero}/detail — fiche complète recto + verso. */
