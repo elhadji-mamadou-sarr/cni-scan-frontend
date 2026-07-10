@@ -146,7 +146,7 @@ function RecordDetail() {
           <Button
             variant="outline"
             className="h-10 gap-1.5"
-            onClick={() => navigate({ to: "/verify", search: { numero: recto.numero_cni } })}
+            onClick={() => navigate({ to: "/verify/$numero", params: { numero: recto.numero_cni } })}
           >
             <Pencil className="h-4 w-4" /> Modifier
           </Button>

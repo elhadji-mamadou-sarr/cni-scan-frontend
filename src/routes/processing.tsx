@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   Loader2,
@@ -15,7 +15,8 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useExtract } from "@/lib/hooks";
+import { ApiError, postExtract } from "@/lib/api";
+import type { CniExtractionResponse } from "@/lib/types";
 import {
   clearPendingUpload,
   getPendingUpload,
@@ -40,60 +41,80 @@ const STEPS = [
   { key: "validate", label: "Validation finale", desc: "Vérification des sommes de contrôle", Icon: ShieldCheck },
 ] as const;
 
+type Phase = "pending" | "success" | "error";
+
 function ProcessingPage() {
   const navigate = useNavigate();
-  const extract = useExtract();
   const startedRef = useRef(false);
+  const [phase, setPhase] = useState<Phase>("pending");
+  const [data, setData] = useState<CniExtractionResponse | null>(null);
+  const [errorMessage, setErrorMessage] = useState("L'extraction a échoué.");
   const [elapsed, setElapsed] = useState(0);
 
-  // Lance l'extraction à partir des fichiers déposés à l'étape 1.
-  // persist=false : on n'enregistre PAS ici. La persistance se fait à l'étape
-  // de vérification (bouton « Valider et enregistrer »).
-  const runExtraction = useCallback(() => {
+  // Lance l'extraction (persist=false : on n'enregistre PAS ici, la
+  // persistance se fait à l'étape de vérification). fetch direct + état React :
+  // volontairement SANS react-query ici, pour éviter le piège StrictMode où
+  // l'observer de mutation peut ne jamais refléter la réponse (écran figé
+  // malgré un backend qui a répondu 200). Exactement un appel, dont le
+  // résultat est toujours appliqué à l'état.
+  const runExtraction = () => {
     const pending = getPendingUpload();
     if (!pending) {
-      // Accès direct à /processing sans fichiers (ou après un rechargement) :
-      // rien à traiter, on renvoie au dépôt.
       navigate({ to: "/upload" });
       return;
     }
-    extract.mutate({ recto: pending.recto, verso: pending.verso, persist: false });
-  }, [extract, navigate]);
+    setPhase("pending");
+    setElapsed(0);
+    postExtract({ recto: pending.recto, verso: pending.verso, persist: false })
+      .then((res) => {
+        setData(res);
+        setPhase("success");
+      })
+      .catch((err) => {
+        setErrorMessage(err instanceof ApiError ? err.message : "L'extraction a échoué.");
+        setPhase("error");
+      });
+  };
 
+  // Une seule fois au montage (le ref protège du double-montage StrictMode ;
+  // pas d'annulation au cleanup pour que l'unique appel aboutisse toujours).
   useEffect(() => {
-    if (startedRef.current) return; // évite le double-lancement (StrictMode)
+    if (startedRef.current) return;
     startedRef.current = true;
     runExtraction();
-  }, [runExtraction]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Navigation pilotée par l'ÉTAT de la mutation (et non par un callback
-  // onSuccess passé à mutate() : en dev/StrictMode ce callback peut ne pas
-  // être rappelé après un remontage, laissant l'écran bloqué malgré un
-  // backend qui a répondu 200).
-  useEffect(() => {
-    if (!extract.isSuccess || !extract.data) return;
-    setLastExtraction(extract.data);
+  // Passe à l'écran de vérification avec les données extraites.
+  const continueToVerify = () => {
+    if (!data) return;
+    setLastExtraction(data);
     clearPendingUpload();
-    navigate({ to: "/verify", search: { numero: extract.data.recto.numero_cni } });
-  }, [extract.isSuccess, extract.data, navigate]);
+    navigate({ to: "/verify/$numero", params: { numero: data.recto.numero_cni } });
+  };
 
-  // Chronomètre d'attente : sert à animer une progression *indicative* et à
-  // afficher un message rassurant au-delà de 15 s. Aucune étape n'est marquée
-  // « terminée » avant la vraie réponse.
+  // Redirection automatique dès que l'extraction réussit. Le panneau de succès
+  // + bouton « Continuer » garantissent qu'on n'est jamais bloqué si la
+  // redirection échoue pour une raison d'environnement.
   useEffect(() => {
-    if (!extract.isPending) return;
-    setElapsed(0);
+    if (phase !== "success" || !data) return;
+    continueToVerify();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, data]);
+
+  // Chronomètre d'attente : progression *indicative* + message rassurant après
+  // 15 s. Aucune étape n'est marquée « terminée » avant la vraie réponse.
+  useEffect(() => {
+    if (phase !== "pending") return;
     const id = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(id);
-  }, [extract.isPending]);
+  }, [phase]);
 
   const handleRetry = () => {
-    extract.reset();
     runExtraction();
   };
 
-  const failed = extract.isError;
-  const errorMessage = extract.error?.message ?? "L'extraction a échoué.";
+  const failed = phase === "error";
   // Progression asymptotique (n'atteint jamais 100 % : on navigue au succès).
   const progress = Math.min(95, Math.round((1 - Math.exp(-elapsed / 12)) * 100));
   const activeIndex = elapsed % STEPS.length; // rotation visuelle pendant l'attente
@@ -127,7 +148,22 @@ function ProcessingPage() {
           </li>
         </ol>
 
-        {!failed ? (
+        {phase === "success" ? (
+          <div className="rounded-xl border border-border bg-surface p-8 text-center shadow-[var(--shadow-card)]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-success">
+              <Check className="h-7 w-7" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-foreground">Extraction réussie</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+              Redirection vers l'écran de vérification…
+            </p>
+            <div className="mt-6">
+              <Button className="h-11" onClick={continueToVerify}>
+                Continuer vers la vérification
+              </Button>
+            </div>
+          </div>
+        ) : !failed ? (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
             {/* Central document preview */}
             <section className="rounded-xl border border-border bg-surface p-6 shadow-[var(--shadow-card)] lg:p-8">

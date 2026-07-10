@@ -276,7 +276,7 @@ function Dashboard() {
                               </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem asChild>
-                              <Link to="/verify" search={{ numero: r.numero_cni }}>
+                              <Link to="/verify/$numero" params={{ numero: r.numero_cni }}>
                                 <Pencil className="h-4 w-4 mr-2" /> Éditer
                               </Link>
                             </DropdownMenuItem>
